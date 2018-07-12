@@ -378,7 +378,9 @@ class enrol_medley_plugin extends enrol_plugin {
         $functionname = 'obterDadosDisciplinasCCEAD';
 
         $visible_courses = $DB->get_records_menu('course', array('visible' => 1), '', 'shortname, id');
-        $visible_courses =  array('CRE1100','FIL1000');
+        $visible_courses =  array('ENG1031','ENG1032','ENG1700','ENG1701','ENG1702','ENG1703','ENG1704','ENG1705'
+        							,'ENG1707','ENG1708','ENG1709','ENG1710','ENG1712','ENG1713','ENG1714','ENG1715',
+        							'ENG1716','ENG1717','ENG1718','ENG1719','ENG1720','ENG1721','ENG1784');
        
 
 		/*
