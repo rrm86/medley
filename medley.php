@@ -2,7 +2,7 @@
 
 trait medley{
 	private function mecanica_courses(){
-		$courses = array('medley_mecanica'=>array('ENG1700','ENG1701','ENG1702'));
+		$courses = array('medley_mecanica'=>array('ENG1031','ENG1032','ENG1701'));
 		return $courses;
 		/*array('ENG1031','ENG1032','ENG1700','ENG1701','ENG1702','ENG1703','ENG1704','ENG1705'
         							,'ENG1707','ENG1708','ENG1709','ENG1710','ENG1712','ENG1713','ENG1714','ENG1715',
@@ -10,7 +10,7 @@ trait medley{
 	}
 
 	private function adm_courses(){
-		$courses = array('medley_adm'=>array('ADM1000','ADM1001'));
+		$courses = array('medley_adm'=>array('ADM1020'));
 		return $courses;
 
 	}
@@ -28,10 +28,6 @@ trait medley{
 		$courses = array_keys($courses);
 		return $courses;
 
-	}
-
-	public function teste_trait(){
-		return 'testeasdasdasd';
 	}
 
 }

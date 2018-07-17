@@ -23,11 +23,14 @@
  * @copyright  Ronnald R Machado
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
+require_once('medley.php');
 
 defined('MOODLE_INTERNAL') || die();
 
 
 class enrol_medley_plugin extends enrol_plugin {
+
+	use medley;
 
     public function __construct() {
         $this->load_config();
@@ -102,14 +105,18 @@ class enrol_medley_plugin extends enrol_plugin {
             }
             $oneidnumber = $course->idnumber;
         }
-*/
-        if ($full) {
-			$courses = $this->get_courses($trace, true);
-			//$trace->output('Finalização da 1a parte FULL (para testes).');
-			//return;
-		} else {
-			$courses = $this->get_courses($trace);
-		}
+*/		
+        /*iniciar o foreach aqui*/
+        $course_names = $this->name_medley_courses();
+
+        foreach ($course_names as $name) {
+        	
+        	print_r($name);
+        
+
+
+		$courses = $this->get_courses($trace,$name);
+
         if (count($courses)) {
 
             $ignorehidden = false;//$this->get_config('ignorehiddencourses');
@@ -361,10 +368,11 @@ class enrol_medley_plugin extends enrol_plugin {
 
             }
         }
+    }
         $trace->finished();
     }
 
-    private function get_courses($trace, $full = null) {
+    private function get_courses($trace, $name) {
         global $DB;
 		
 		// [2017-09-07] variavel 'full' para criar a lista completa ou em partes - alterado o parametro na API
@@ -378,9 +386,13 @@ class enrol_medley_plugin extends enrol_plugin {
         $functionname = 'obterDadosDisciplinasCCEAD';
 
         $visible_courses = $DB->get_records_menu('course', array('visible' => 1), '', 'shortname, id');
-        $visible_courses =  array('ENG1031','ENG1032','ENG1700','ENG1701','ENG1702','ENG1703','ENG1704','ENG1705'
-        							,'ENG1707','ENG1708','ENG1709','ENG1710','ENG1712','ENG1713','ENG1714','ENG1715',
-        							'ENG1716','ENG1717','ENG1718','ENG1719','ENG1720','ENG1721','ENG1784');
+        $visible_courses =  array('ENG1031','ENG1032');
+
+        $visible_courses = $this->get_medley_courses();
+        $visible_courses = $visible_courses[$name];
+        print_r('--------');
+        print_r($visible_courses);
+        print_r('--------');
        
 
 		/*
@@ -417,6 +429,7 @@ class enrol_medley_plugin extends enrol_plugin {
 
                 if (is_object($d->vetTurma->DadosTurma)) {
 
+
 					$trace->output('>>> single group');
 					$t = $d->vetTurma->DadosTurma;
 
@@ -440,7 +453,7 @@ class enrol_medley_plugin extends enrol_plugin {
 							$trace->output('Additional teacher: '.$value);
 						}
                     }
-
+                    print_r($visible_courses[$d->codDisciplina].'-----');
                     try {
                         if (isset($visible_courses[$d->codDisciplina.'_'.$this->addDot($disciplinas->obterDadosDisciplinasCCEADResult->numPeriodo)])) {
 
@@ -473,6 +486,7 @@ class enrol_medley_plugin extends enrol_plugin {
                                 }
 
                         } else {
+                        	#print_r('oi');
                             $trace->output('Course does not exist or is not visible; skipping students');
                         }
                     } catch (Exception $e) {
@@ -574,13 +588,13 @@ class enrol_medley_plugin extends enrol_plugin {
             $all_enrols['student'][] = $m;
             $all_groups['PUC-RIO'][] = $m;
         }
-        $coursesout[] = array('shortname' => 'disciplinas',
-                                   'fullname' => 'DISCIPLINAS AGREGADAS',
+        $coursesout[] = array('shortname' => $name,
+                                   'fullname' => $name,
                                    'enrols' => $all_enrols,
                                    'groups' => $all_groups);
 
-        
-        return $coursesout;
+
+        #return $coursesout;
     }
 
     private function call_medley($functionname, $params = array()) {
