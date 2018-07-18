@@ -125,6 +125,9 @@ class enrol_medley_plugin extends enrol_plugin {
 
             foreach ($courses as $course) {
 
+            	print_r('---');
+            	print_r($course);
+            	print_r('----');
                 $course = array_change_key_case($course, CASE_LOWER);
                 $shortname = $course['shortname'];
 
@@ -390,9 +393,7 @@ class enrol_medley_plugin extends enrol_plugin {
 
         $visible_courses = $this->get_medley_courses();
         $visible_courses = $visible_courses[$name];
-        print_r('--------');
-        print_r($visible_courses);
-        print_r('--------');
+       
        
 
 		/*
@@ -453,9 +454,9 @@ class enrol_medley_plugin extends enrol_plugin {
 							$trace->output('Additional teacher: '.$value);
 						}
                     }
-                    print_r($visible_courses[$d->codDisciplina].'-----');
+
                     try {
-                        if (isset($visible_courses[$d->codDisciplina.'_'.$this->addDot($disciplinas->obterDadosDisciplinasCCEADResult->numPeriodo)])) {
+                        if (in_array($d->codDisciplina, $visible_courses)) {
 
                                 $trace->output('Course exists and is visible; getting students');
 
@@ -472,21 +473,25 @@ class enrol_medley_plugin extends enrol_plugin {
                                 if (isset($result->obterDadosAlunosDisciplinaCCEADResult->vetAlunos)) {
                                     if (is_array($result->obterDadosAlunosDisciplinaCCEADResult->vetAlunos->DadosAluno)) {
                                         foreach ($result->obterDadosAlunosDisciplinaCCEADResult->vetAlunos->DadosAluno as $a) {
-
+                                        	$this->create_user($a);
                                             $a->matricula = str_pad($a->matricula, 7, "0", STR_PAD_LEFT);
                                             $enrol['student'][] = 'a'.$a->matricula;
-                                            $groups[$t->codTurma][] = 'a'.$a->matricula;
+                                            $groups['PUC-RIO'][] = 'a'.$a->matricula;
                                         }
                                     } else {
+                                    	$this->create_user($a);
                                         $a = $result->obterDadosAlunosDisciplinaCCEADResult->vetAlunos->DadosAluno;
                                         $a->matricula = str_pad($a->matricula, 7, "0", STR_PAD_LEFT);
                                         $enrol['student'][] = 'a'.$a->matricula;
-                                        $groups[$t->codTurma][] = 'a'.$a->matricula;
+                                        $groups['PUC-RIO'][] = 'a'.$a->matricula;
                                     }
                                 }
+                                $courses[] = array('shortname' => 'disciplinas',
+                                   'fullname' => 'DISCIPLINAS AGREGADAS',
+                                   'enrols' => $enrol,
+                                   'groups' => $groups);
 
                         } else {
-                        	#print_r('oi');
                             $trace->output('Course does not exist or is not visible; skipping students');
                         }
                     } catch (Exception $e) {
@@ -575,7 +580,7 @@ class enrol_medley_plugin extends enrol_plugin {
             die('Obter dados disciplinas falhou. Abortando.');
         }
         
-
+        #print_r($courses);
         $all_members = array();
 
         for ($i=0; $i < sizeof($courses); $i++) {
@@ -594,7 +599,7 @@ class enrol_medley_plugin extends enrol_plugin {
                                    'groups' => $all_groups);
 
 
-        #return $coursesout;
+        return $coursesout;
     }
 
     private function call_medley($functionname, $params = array()) {
