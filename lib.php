@@ -111,266 +111,261 @@ class enrol_medley_plugin extends enrol_plugin {
 
         foreach ($course_names as $name) {
         	
-        	print_r($name);
-        
 
+    		$courses = $this->get_courses($trace,$name);
 
-		$courses = $this->get_courses($trace,$name);
+            if (count($courses)) {
 
-        if (count($courses)) {
+                $ignorehidden = false;//$this->get_config('ignorehiddencourses');
 
-            $ignorehidden = false;//$this->get_config('ignorehiddencourses');
+                $trace->output('got courses');
 
-            $trace->output('got courses');
+                foreach ($courses as $course) {
 
-            foreach ($courses as $course) {
+                	
+                    $course = array_change_key_case($course, CASE_LOWER);
+                    $shortname = $course['shortname'];
 
-            	print_r('---');
-            	print_r($course);
-            	print_r('----');
-                $course = array_change_key_case($course, CASE_LOWER);
-                $shortname = $course['shortname'];
+                    // Does the course exist in moodle already?
+                    $course_obj = $DB->get_record('course', array('shortname' => $shortname));
+                    if (empty($course_obj)) { // Course doesn't exist
 
-                // Does the course exist in moodle already?
-                $course_obj = $DB->get_record('course', array('shortname' => $shortname));
-                if (empty($course_obj)) { // Course doesn't exist
-
-                    if (!$newcourseid = $this->create_course($course, $trace)) {
-                        $trace->output('Warning: course not created');
+                        if (!$newcourseid = $this->create_course($course, $trace)) {
+                            $trace->output('Warning: course not created');
+                            continue;
+                        }
+                        $trace->output('Course created: '.$shortname);
+                        $course_obj = $DB->get_record('course', array('id'=>$newcourseid));
+                    } else {  // Check if course needs update & update as needed.
+                        $this->update_course($course_obj, $course, $trace);
+                        $trace->output('course already exists; updated: '.$shortname);
+                    }
+                    if ($ignorehidden && !$course_obj->visible) {
+                        $trace->output('Course hidden; skipping enrols');
                         continue;
                     }
-                    $trace->output('Course created: '.$shortname);
-                    $course_obj = $DB->get_record('course', array('id'=>$newcourseid));
-                } else {  // Check if course needs update & update as needed.
-                    $this->update_course($course_obj, $course, $trace);
-                    $trace->output('course already exists; updated: '.$shortname);
-                }
-                if ($ignorehidden && !$course_obj->visible) {
-                    $trace->output('Course hidden; skipping enrols');
-                    continue;
-                }
 
-                // Enrol & unenrol
+                    // Enrol & unenrol
 
-                foreach ($course['enrols'] as $role_shortname => $members) {
-                	
+                    foreach ($course['enrols'] as $role_shortname => $members) {
+                    	
 
-                    $trace->output('Enrolling: '. $role_shortname);
+                        $trace->output('Enrolling: '. $role_shortname);
 
-                    $role = $DB->get_record('role', array('shortname' => $role_shortname));
+                        $role = $DB->get_record('role', array('shortname' => $role_shortname));
 
-                    // Prune old medley enrolments
-                    // hopefully they'll fit in the max buffer size for the RDBMS
-                    $sql= "SELECT u.id as userid, u.username, ue.status, ra.contextid, ra.itemid as instanceid
-                             FROM {user} u
-                             JOIN {role_assignments} ra
-                               ON (ra.userid = u.id AND
-                                   ra.component = 'enrol_medley' AND
-                                   ra.roleid = :roleid)
-                             JOIN {user_enrolments} ue
-                               ON (ue.userid = u.id AND
-                                   ue.enrolid = ra.itemid)
-                             JOIN {enrol} e
-                               ON (e.id = ue.enrolid)
-                            WHERE u.deleted = 0
-                              AND e.courseid = :courseid ";
+                        // Prune old medley enrolments
+                        // hopefully they'll fit in the max buffer size for the RDBMS
+                        $sql= "SELECT u.id as userid, u.username, ue.status, ra.contextid, ra.itemid as instanceid
+                                 FROM {user} u
+                                 JOIN {role_assignments} ra
+                                   ON (ra.userid = u.id AND
+                                       ra.component = 'enrol_medley' AND
+                                       ra.roleid = :roleid)
+                                 JOIN {user_enrolments} ue
+                                   ON (ue.userid = u.id AND
+                                       ue.enrolid = ra.itemid)
+                                 JOIN {enrol} e
+                                   ON (e.id = ue.enrolid)
+                                WHERE u.deleted = 0
+                                  AND e.courseid = :courseid ";
 
-                    $params = array('roleid'=>$role->id, 'courseid'=>$course_obj->id);
+                        $params = array('roleid'=>$role->id, 'courseid'=>$course_obj->id);
 
-                    $context = context_course::instance($course_obj->id);
+                        $context = context_course::instance($course_obj->id);
 
-                    if (!empty($members)) {
+                        if (!empty($members)) {
 
-                        list($ml, $params2) = $DB->get_in_or_equal($members, SQL_PARAMS_NAMED, 'm', false);
-                        $sql .= "AND u.username $ml"; // not in members
-                        $params = array_merge($params, $params2);
-                        unset($params2);
+                            list($ml, $params2) = $DB->get_in_or_equal($members, SQL_PARAMS_NAMED, 'm', false);
+                            $sql .= "AND u.username $ml"; // not in members
+                            $params = array_merge($params, $params2);
+                            unset($params2);
 
-                    } else {
-                        $shortname = format_string($course_obj->shortname, true, array('context' => $context));
-                        $trace->output('No users to enrol with this role');
-                    }
-                    $todelete = $DB->get_records_sql($sql, $params);
+                        } else {
+                            $shortname = format_string($course_obj->shortname, true, array('context' => $context));
+                            $trace->output('No users to enrol with this role');
+                        }
+                        $todelete = $DB->get_records_sql($sql, $params);
 
-                    if (!empty($todelete)) {
-                        // no transactions here!
-                        //$transaction = $DB->start_delegated_transaction();
-                        foreach ($todelete as $row) {
-                            $instance = $DB->get_record('enrol', array('id'=>$row->instanceid));
-                            switch ($this->get_config('unenrolaction')) {
-                                case ENROL_EXT_REMOVED_UNENROL:
-                                    $this->unenrol_user($instance, $row->userid);
-                                    $trace->output(get_string('extremovedunenrol', 'enrol_medley',
-                                                              array('user_username'=> $row->username,
-                                                                    'course_shortname'=>$course_obj->shortname,
-                                                                    'course_id'=>$course_obj->id)));
-                                    break;
-
-                                case ENROL_EXT_REMOVED_KEEP:
-                                    // Keep - only adding enrolments
-                                    break;
-
-                                case ENROL_EXT_REMOVED_SUSPEND:
-                                    if ($row->status != ENROL_USER_SUSPENDED) {
-                                        $DB->set_field('user_enrolments', 'status', ENROL_USER_SUSPENDED, array('enrolid'=>$instance->id, 'userid'=>$row->userid));
-                                        $trace->output(get_string('extremovedsuspend', 'enrol_medley',
+                        if (!empty($todelete)) {
+                            // no transactions here!
+                            //$transaction = $DB->start_delegated_transaction();
+                            foreach ($todelete as $row) {
+                                $instance = $DB->get_record('enrol', array('id'=>$row->instanceid));
+                                switch ($this->get_config('unenrolaction')) {
+                                    case ENROL_EXT_REMOVED_UNENROL:
+                                        $this->unenrol_user($instance, $row->userid);
+                                        $trace->output(get_string('extremovedunenrol', 'enrol_medley',
                                                                   array('user_username'=> $row->username,
                                                                         'course_shortname'=>$course_obj->shortname,
                                                                         'course_id'=>$course_obj->id)));
-                                    }
-                                    break;
+                                        break;
 
-                                case ENROL_EXT_REMOVED_SUSPENDNOROLES:
-                                    if ($row->status != ENROL_USER_SUSPENDED) {
-                                        $DB->set_field('user_enrolments', 'status', ENROL_USER_SUSPENDED, array('enrolid'=>$instance->id, 'userid'=>$row->userid));
-                                    }
-                                    role_unassign_all(array('contextid'=>$row->contextid, 'userid'=>$row->userid, 'component'=>'enrol_medley', 'itemid'=>$instance->id));
-                                    $trace->output(get_string('extremovedsuspendnoroles', 'enrol_medley',
-                                                              array('user_username'=> $row->username,
-                                                                    'course_shortname'=>$course_obj->shortname,
-                                                                    'course_id'=>$course_obj->id)));
-                                    break;
+                                    case ENROL_EXT_REMOVED_KEEP:
+                                        // Keep - only adding enrolments
+                                        break;
+
+                                    case ENROL_EXT_REMOVED_SUSPEND:
+                                        if ($row->status != ENROL_USER_SUSPENDED) {
+                                            $DB->set_field('user_enrolments', 'status', ENROL_USER_SUSPENDED, array('enrolid'=>$instance->id, 'userid'=>$row->userid));
+                                            $trace->output(get_string('extremovedsuspend', 'enrol_medley',
+                                                                      array('user_username'=> $row->username,
+                                                                            'course_shortname'=>$course_obj->shortname,
+                                                                            'course_id'=>$course_obj->id)));
+                                        }
+                                        break;
+
+                                    case ENROL_EXT_REMOVED_SUSPENDNOROLES:
+                                        if ($row->status != ENROL_USER_SUSPENDED) {
+                                            $DB->set_field('user_enrolments', 'status', ENROL_USER_SUSPENDED, array('enrolid'=>$instance->id, 'userid'=>$row->userid));
+                                        }
+                                        role_unassign_all(array('contextid'=>$row->contextid, 'userid'=>$row->userid, 'component'=>'enrol_medley', 'itemid'=>$instance->id));
+                                        $trace->output(get_string('extremovedsuspendnoroles', 'enrol_medley',
+                                                                  array('user_username'=> $row->username,
+                                                                        'course_shortname'=>$course_obj->shortname,
+                                                                        'course_id'=>$course_obj->id)));
+                                        break;
+                                }
                             }
-                        }
-                        //$transaction->allow_commit();
-                    }
-
-                    // Insert current enrolments
-                    // bad we can't do INSERT IGNORE with postgres...
-
-                    // Add necessary enrol instance if not present yet;
-                    $sql = "SELECT c.id, c.visible, e.id as enrolid
-                              FROM {course} c
-                              JOIN {enrol} e
-                                ON (e.courseid = c.id AND
-                                    e.enrol = 'medley')
-                             WHERE c.id = :courseid";
-                    $params = array('courseid'=>$course_obj->id);
-                    if (!($course_instance = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE))) {
-                        $course_instance = new stdClass();
-                        $course_instance->id = $course_obj->id;
-                        $course_instance->visible = $course_obj->visible;
-                        $course_instance->enrolid = $this->add_instance($course_instance);
-                    }
-
-                    if (!$instance = $DB->get_record('enrol', array('id'=>$course_instance->enrolid))) {
-                        continue; // Weird; skip this one.
-                    }
-
-                    $transaction = $DB->start_delegated_transaction();
-                    foreach ($members as $medley_member) {
-
-                        $sql = 'SELECT id,username,1 FROM {user} WHERE username = ? AND deleted = 0';
-
-                        $member = $DB->get_record_sql($sql, array($medley_member));
-
-                        if (empty($member) || empty($member->id)){
-                        	
-                            $trace->output('could not find user:'.$medley_member);
-                            continue;
+                            //$transaction->allow_commit();
                         }
 
-                        $sql= "SELECT ue.status
-                                 FROM {user_enrolments} ue
-                                 JOIN {enrol} e
-                                   ON (e.id = ue.enrolid AND
-                                       e.enrol = 'medley')
-                                WHERE e.courseid = :courseid
-                                  AND ue.userid = :userid";
-                        $params = array('courseid'=>$course_obj->id, 'userid'=>$member->id);
-                        $userenrolment = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE);
+                        // Insert current enrolments
+                        // bad we can't do INSERT IGNORE with postgres...
 
-                        if (empty($userenrolment)) {
+                        // Add necessary enrol instance if not present yet;
+                        $sql = "SELECT c.id, c.visible, e.id as enrolid
+                                  FROM {course} c
+                                  JOIN {enrol} e
+                                    ON (e.courseid = c.id AND
+                                        e.enrol = 'medley')
+                                 WHERE c.id = :courseid";
+                        $params = array('courseid'=>$course_obj->id);
+                        if (!($course_instance = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE))) {
+                            $course_instance = new stdClass();
+                            $course_instance->id = $course_obj->id;
+                            $course_instance->visible = $course_obj->visible;
+                            $course_instance->enrolid = $this->add_instance($course_instance);
+                        }
 
-                            $this->enrol_user($instance, $member->id, $role->id);
-                            // Make sure we set the enrolment status to active. If the user wasn't
-                            // previously enrolled to the course, enrol_user() sets it. But if we
-                            // configured the plugin to suspend the user enrolments _AND_ remove
-                            // the role assignments on external unenrol, then enrol_user() doesn't
-                            // set it back to active on external re-enrolment. So set it
-                            // unconditionally to cover both cases.
-                            $DB->set_field('user_enrolments', 'status', ENROL_USER_ACTIVE, array('enrolid'=>$instance->id, 'userid'=>$member->id));
-                            $trace->output('Enrolled user: '.$member->username);
+                        if (!$instance = $DB->get_record('enrol', array('id'=>$course_instance->enrolid))) {
+                            continue; // Weird; skip this one.
+                        }
 
-                        } else {
+                        $transaction = $DB->start_delegated_transaction();
+                        foreach ($members as $medley_member) {
 
-                            if (!$DB->record_exists('role_assignments', array('roleid'=>$role->id, 'userid'=>$member->id, 'contextid'=>$context->id, 'component'=>'enrol_medley', 'itemid'=>$instance->id))) {
-                                // This happens when reviving users or when user has multiple roles in one course.
-                                $context = context_course::instance($course_obj->id);
+                            $sql = 'SELECT id,username,1 FROM {user} WHERE username = ? AND deleted = 0';
 
-                                role_assign($role->id, $member->id, $context->id, 'enrol_medley', $instance->id);
-                                $trace->output("Assign role to user '$member->username' in course '$course_obj->shortname ($course_obj->id)'");
+                            $member = $DB->get_record_sql($sql, array($medley_member));
+
+                            if (empty($member) || empty($member->id)){
+                            	
+                                $trace->output('could not find user:'.$medley_member);
+                                continue;
                             }
-                            if ($userenrolment->status == ENROL_USER_SUSPENDED) {
-                                // Reenable enrolment that was previously disabled. Enrolment refreshed
+
+                            $sql= "SELECT ue.status
+                                     FROM {user_enrolments} ue
+                                     JOIN {enrol} e
+                                       ON (e.id = ue.enrolid AND
+                                           e.enrol = 'medley')
+                                    WHERE e.courseid = :courseid
+                                      AND ue.userid = :userid";
+                            $params = array('courseid'=>$course_obj->id, 'userid'=>$member->id);
+                            $userenrolment = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE);
+
+                            if (empty($userenrolment)) {
+
+                                $this->enrol_user($instance, $member->id, $role->id);
+                                // Make sure we set the enrolment status to active. If the user wasn't
+                                // previously enrolled to the course, enrol_user() sets it. But if we
+                                // configured the plugin to suspend the user enrolments _AND_ remove
+                                // the role assignments on external unenrol, then enrol_user() doesn't
+                                // set it back to active on external re-enrolment. So set it
+                                // unconditionally to cover both cases.
                                 $DB->set_field('user_enrolments', 'status', ENROL_USER_ACTIVE, array('enrolid'=>$instance->id, 'userid'=>$member->id));
-                                $trace->output('Reenable enrolment for user:'.$course_obj->shortname);
+                                $trace->output('Enrolled user: '.$member->username);
+
+                            } else {
+
+                                if (!$DB->record_exists('role_assignments', array('roleid'=>$role->id, 'userid'=>$member->id, 'contextid'=>$context->id, 'component'=>'enrol_medley', 'itemid'=>$instance->id))) {
+                                    // This happens when reviving users or when user has multiple roles in one course.
+                                    $context = context_course::instance($course_obj->id);
+
+                                    role_assign($role->id, $member->id, $context->id, 'enrol_medley', $instance->id);
+                                    $trace->output("Assign role to user '$member->username' in course '$course_obj->shortname ($course_obj->id)'");
+                                }
+                                if ($userenrolment->status == ENROL_USER_SUSPENDED) {
+                                    // Reenable enrolment that was previously disabled. Enrolment refreshed
+                                    $DB->set_field('user_enrolments', 'status', ENROL_USER_ACTIVE, array('enrolid'=>$instance->id, 'userid'=>$member->id));
+                                    $trace->output('Reenable enrolment for user:'.$course_obj->shortname);
+                                }
                             }
                         }
+
+                        $transaction->allow_commit();
                     }
 
-                    $transaction->allow_commit();
-                }
+                    $trace->output('done enrols; starting groups');
 
-                $trace->output('done enrols; starting groups');
+                    foreach ($course['groups'] as $pucgroup => $members) {
 
-                foreach ($course['groups'] as $pucgroup => $members) {
-
-                    if ($group = $DB->get_record('groups', array('name'=>$pucgroup, 'courseid' => $course_obj->id))) {
-                        $group_id = $group->id;
-                    } else {
-                        $group = new stdclass();
-                        $group->name = $pucgroup;
-                        $group->courseid = $course_obj->id;
-                        $group_id = groups_create_group($group);
-                        $trace->output('Created group: '.$pucgroup);
-                    }
-
-                    foreach ($members as $member) {
-                        // user must exist to avoid exception throw
-                        if ($user_id = $DB->get_field('user', 'id', array('username' => $member))) {
-                            groups_add_member($group_id, $user_id);  // it already avoids duplicate members
+                        if ($group = $DB->get_record('groups', array('name'=>$pucgroup, 'courseid' => $course_obj->id))) {
+                            $group_id = $group->id;
+                        } else {
+                            $group = new stdclass();
+                            $group->name = $pucgroup;
+                            $group->courseid = $course_obj->id;
+                            $group_id = groups_create_group($group);
+                            $trace->output('Created group: '.$pucgroup);
                         }
-                    }
 
-                    $groups_members = groups_get_members($group_id, 'u.username, u.id');
-                    foreach ($groups_members as $gm) {
-
-						/*  alteração RGA - 2014-08-21: verifica se o usuario foi inscrito pelo plugin 'manual'    */
-						/*  alteração RRM - 2016-11-04: complementa a verificação, verifica se a inscrição foi por 'cohort'    */
-						$sql= "SELECT e.enrol
-								 FROM {enrol} e
-								 JOIN {user_enrolments} ue
-								   ON (e.id = ue.enrolid)
-								WHERE ue.userid = :userid
-								  AND e.courseid = :courseid
-								  AND (e.enrol = 'manual'
-								  OR  e.enrol = 'cohort')";
-
-						$params = array('courseid'=>$group->courseid, 'userid'=>$gm->id);
-						$userenrolmenttype = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE);
-						$userenrolmanual = false;
-						if (!empty($userenrolmenttype)) {
-							$userenrolmanual = true;
-						}
-
-						// if (!in_array($gm->username, $members)) {
-
-
-						// somente apaga da lista se nao estiver na lista de grupos e se nao tiver sido inscrito manualmente
-						/* fim da alteração RGA - 2014-09-02    */
-
-
-						if (!in_array($gm->username, $members) && !$userenrolmanual) {
-                            groups_remove_member($group_id, $gm->id);
+                        foreach ($members as $member) {
+                            // user must exist to avoid exception throw
+                            if ($user_id = $DB->get_field('user', 'id', array('username' => $member))) {
+                                groups_add_member($group_id, $user_id);  // it already avoids duplicate members
+                            }
                         }
+
+                        $groups_members = groups_get_members($group_id, 'u.username, u.id');
+                        foreach ($groups_members as $gm) {
+
+    						/*  alteração RGA - 2014-08-21: verifica se o usuario foi inscrito pelo plugin 'manual'    */
+    						/*  alteração RRM - 2016-11-04: complementa a verificação, verifica se a inscrição foi por 'cohort'    */
+    						$sql= "SELECT e.enrol
+    								 FROM {enrol} e
+    								 JOIN {user_enrolments} ue
+    								   ON (e.id = ue.enrolid)
+    								WHERE ue.userid = :userid
+    								  AND e.courseid = :courseid
+    								  AND (e.enrol = 'manual'
+    								  OR  e.enrol = 'cohort')";
+
+    						$params = array('courseid'=>$group->courseid, 'userid'=>$gm->id);
+    						$userenrolmenttype = $DB->get_record_sql($sql, $params, IGNORE_MULTIPLE);
+    						$userenrolmanual = false;
+    						if (!empty($userenrolmenttype)) {
+    							$userenrolmanual = true;
+    						}
+
+    						// if (!in_array($gm->username, $members)) {
+
+
+    						// somente apaga da lista se nao estiver na lista de grupos e se nao tiver sido inscrito manualmente
+    						/* fim da alteração RGA - 2014-09-02    */
+
+
+    						if (!in_array($gm->username, $members) && !$userenrolmanual) {
+                                groups_remove_member($group_id, $gm->id);
+                            }
+                        }
+
                     }
+                    $trace->output('done with groups; done with this course');
 
                 }
-                $trace->output('done with groups; done with this course');
-
             }
-        }
     }
         $trace->finished();
     }
